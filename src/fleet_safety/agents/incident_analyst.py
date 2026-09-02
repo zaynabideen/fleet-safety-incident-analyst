@@ -120,6 +120,10 @@ class FleetSafetyIncidentAnalyst:
             )
             output.incident_id = incident.incident_id
 
+        # timestamp is never the LLM's to decide — carry it straight from
+        # the input so Agent 2 can order this driver's incidents in time.
+        output.timestamp = incident.timestamp
+
         if notes:
             output.limitations = [*output.limitations, *notes]
 

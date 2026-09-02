@@ -146,29 +146,104 @@ video vs. description that must lower confidence and force human review.
 - Single-incident, stateless. No historical driver context yet (the brief
   explicitly says not to require it for Agent 1) — that's Agent 2's job.
 
-## 6. Path to Agent 2 (Driver Risk Analyst)
+## 6. Agent 2 — Driver Risk Analyst
 
-`IncidentOutput` is the whole handoff. Agent 2 will consume a list of
-`IncidentOutput` objects (one driver's history over N days) and read
-`severity`, `contributing_factors`, `driver_contribution`, `root_cause`,
-and `evidence` off each — no re-parsing of raw incident data, no
-re-deriving facts the first agent already established. Concretely:
+Built. Question it answers: "is this driver becoming risky?" — given one
+driver's history of Agent 1 outputs over a time window.
 
-```python
-history: list[IncidentOutput] = [agent1.analyze(i) for i in driver_102_incidents]
-driver_risk = driver_risk_agent.analyze(driver_id="102", incident_history=history)
+### 6.1 The one design decision worth defending: split the numbers from the words
+
+Agent 1's job (read messy, unstructured evidence about a single event and
+form a qualitative judgment) is a genuinely good fit for an LLM. Agent 2's
+job is mostly arithmetic: count incidents by type, weight them by severity
+and by how much the driver actually contributed, compare the first half of
+the window to the second half to call a trend. That's not a judgment call
+with room for reasonable disagreement — it's a formula with one correct
+answer for a given input.
+
+So `stats/driver_risk_stats.py` computes all of that in plain Python —
+`risk_score`, `risk_level`, `trend`, `incident_breakdown`, which
+`recurring_patterns` exist and how many times each occurred — with zero
+LLM involvement. The LLM (`prompts/driver_risk_analyst.py`) is only ever
+handed those already-computed numbers and asked to write grounded
+sentences explaining them (`recurring_patterns[].explanation`,
+`recommended_focus_areas`). It is explicitly told not to introduce a
+number it wasn't given, and the agent enforces that in code
+(`_validate_narrative`): if the model's response mentions a pattern that
+doesn't match what the stats engine actually found, the agent discards it
+and falls back to a deterministic template rather than trusting it. Same
+principle as Agent 1's `_enforce_invariants` — a safety-relevant number
+should never depend on a language model remembering to stay in its lane.
+
+This also means Agent 2 still works, fully, with zero API calls — the
+`DriverRiskMockLLMClient` narrative fallback and the "real" narrative
+path differ only in prose quality, never in the score, level, trend, or
+counts. That is unlike Agent 1, where the mock is a rough approximation
+of the actual reasoning.
+
+### 6.2 Scoring formula (deliberately simple and auditable)
+
+```
+per_incident_points = SEVERITY_WEIGHT[severity] × CONTRIBUTION_MULTIPLIER[driver_contribution.level]
+raw = sum(per_incident_points for every incident)
+risk_score = min(100, round(raw × (30 / time_window_days)))
 ```
 
-Because the schema is Pydantic and stable, Agent 2's own input schema can
-just declare `incident_history: list[IncidentOutput]` and get validation
-for free. The same `LLMClient` abstraction, retry/repair loop, and
-invariant-enforcement pattern built here carry over directly — Agent 2 is
-new prompt + new schema + new rule engine for its mock backend, not a new
-orchestration mechanism.
+`SEVERITY_WEIGHT`: LOW=5, MEDIUM=15, HIGH=35, CRITICAL=70 — each step up
+matters a lot more than the last, so a handful of CRITICAL events don't
+get diluted by a pile of LOW ones. `CONTRIBUTION_MULTIPLIER`: NONE=0.2 up
+to SIGNIFICANT=1.4 — this is the same "don't automatically blame the
+driver" principle from Agent 1's Rule 2, carried into the score itself:
+four HIGH-severity events the driver didn't cause (defensive braking)
+score meaningfully lower than four HIGH-severity events where they were
+the significant contributor (`test_defensive_driving_scores_lower_than_at_fault_driving`
+asserts exactly this). The `× (30 / time_window_days)` term normalizes to
+a "per 30 days" basis so a driver evaluated over 7 days and one evaluated
+over 90 days are comparable — without it, a longer window would look
+artificially riskier just by accumulating more incidents.
 
-Two fields were added specifically to make this handoff useful, not just
-possible: `requires_human_review` (so Agent 2 doesn't have to
-re-derive when a human already needed to look at something) and
-`limitations` (so a low-confidence incident doesn't silently carry the
-same statistical weight as a well-evidenced one when Agent 2 computes a
-risk score — it can discount or exclude on that basis).
+Trend compares the mean weighted score of the first half of the window's
+incidents (by timestamp) to the second half; below `MIN_INCIDENTS_FOR_TREND`
+(4) dated incidents, it honestly reports `INSUFFICIENT_DATA` rather than
+guessing. Recurring patterns group by `root_cause.cause` from Agent 1's
+output and keep groups seen 2+ times, with their own (separately
+computed) frequency trend.
+
+### 6.3 The Agent 1 → Agent 2 handoff
+
+Agent 1 didn't originally carry `timestamp` in its output (only its
+input) — Agent 2 needs it to order incidents in time, so it was added as
+an optional field on `IncidentOutput`, set by the agent (not the LLM)
+directly from the input, the same way `incident_id` mismatches are
+corrected. Everything else Agent 2 needs was already there:
+`severity`, `driver_contribution`, `root_cause`, `confidence`.
+
+Deliberately, **neither agent** decides which incidents belong to which
+driver — that association is the caller's responsibility
+(`scripts/analyze_driver.py` shows the full shape: raw incidents in, run
+each through Agent 1 independently, group the results by driver, hand
+that list to Agent 2). Agent 1 has no concept of "driver 102"; it
+analyzes one incident at a time, which is what keeps it reusable outside
+a fleet-management context too.
+
+```python
+analyzed = [incident_agent.analyze(raw) for raw in driver_102_raw_incidents]
+driver_risk = driver_agent.analyze(DriverRiskInput(
+    driver_id="102", time_window_days=30, incidents=analyzed,
+))
+```
+
+`test_pipeline_integration.py` runs exactly this, starting from raw
+incident dicts (not hand-built `IncidentOutput`), which is what actually
+proves the two agents connect rather than each working in isolation.
+
+### 6.4 Path to Agent 3 (Fleet Risk Analyst)
+
+`DriverRiskOutput` is the next handoff — Agent 3 will consume a list of
+these (one per driver across the fleet) the same way Agent 2 consumed a
+list of `IncidentOutput`. The same split carries over even more cleanly
+there: "which behaviours are trending up fleet-wide, is there a
+geographic or time-of-day cluster" is almost entirely aggregation over
+already-computed `risk_score`/`trend`/`incident_breakdown` fields, so
+Agent 3's own stats engine is a natural next file in `stats/`, not a
+rewrite of this pattern.

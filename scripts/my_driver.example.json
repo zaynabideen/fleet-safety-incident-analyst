@@ -1,0 +1,26 @@
+{
+  "driver_id": "D-EXAMPLE",
+  "time_window_days": 30,
+  "incidents": [
+    {
+      "incident_id": "INC-1",
+      "event_type": "harsh_braking",
+      "vehicle_speed": 40,
+      "following_distance": 1.8,
+      "road_condition": "dry",
+      "location_type": "highway",
+      "description": "Write your first incident here.",
+      "timestamp": "2026-08-02T09:00:00"
+    },
+    {
+      "incident_id": "INC-2",
+      "event_type": "harsh_braking",
+      "vehicle_speed": 45,
+      "following_distance": 1.0,
+      "road_condition": "wet",
+      "location_type": "highway",
+      "description": "Write your second incident here.",
+      "timestamp": "2026-08-20T09:00:00"
+    }
+  ]
+}

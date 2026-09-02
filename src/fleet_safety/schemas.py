@@ -70,6 +70,20 @@ class SpeedUnit(str, Enum):
     KMH = "kmh"
 
 
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class TrendDirection(str, Enum):
+    INCREASING = "INCREASING"
+    DECREASING = "DECREASING"
+    STABLE = "STABLE"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
 # ---------------------------------------------------------------------------
 # Input schema
 # ---------------------------------------------------------------------------
@@ -181,4 +195,70 @@ class IncidentOutput(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     recommended_action: RecommendedAction
     requires_human_review: bool
+    limitations: list[str] = Field(default_factory=list)
+
+    # Carried over from IncidentInput.timestamp by the agent (not decided by
+    # the LLM) — added for Agent 2 (Driver Risk Analyst), which needs to
+    # order a driver's incidents in time to detect a worsening/improving
+    # trend. Optional because older incidents, or a caller that never had a
+    # timestamp, must still work.
+    timestamp: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Agent 2 — Driver Risk Analyst — schemas
+#
+# Agent 2 consumes a LIST of Agent 1's IncidentOutput for one driver, not raw
+# incidents. This is deliberate: it should never have to re-derive facts,
+# severity, or root cause that Agent 1 already established — it only asks
+# "across this driver's already-analyzed history, what pattern emerges?"
+# ---------------------------------------------------------------------------
+
+class CategoryCount(BaseModel):
+    category: str
+    count: int = Field(ge=0)
+
+
+class RecurringPattern(BaseModel):
+    pattern: str
+    occurrences: int = Field(ge=1)
+    trend: TrendDirection
+    explanation: str
+    example_incident_ids: list[str] = Field(default_factory=list)
+
+
+class DriverRiskInput(BaseModel):
+    model_config = {"extra": "allow"}
+
+    driver_id: str
+    time_window_days: int = Field(default=30, ge=1)
+    incidents: list[IncidentOutput] = Field(default_factory=list)
+
+    @field_validator("driver_id")
+    @classmethod
+    def driver_id_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("driver_id must not be blank")
+        return v
+
+
+class DriverRiskOutput(BaseModel):
+    driver_id: str
+    time_window_days: int
+
+    total_incidents: int = Field(ge=0)
+    incident_breakdown: list[CategoryCount] = Field(default_factory=list)
+
+    risk_score: int = Field(ge=0, le=100)
+    risk_level: RiskLevel
+    trend: TrendDirection
+
+    primary_concern: str
+    recurring_patterns: list[RecurringPattern] = Field(default_factory=list)
+
+    evidence: list[str] = Field(default_factory=list)
+    confidence: int = Field(ge=0, le=100)
+
+    recommended_focus_areas: list[str] = Field(default_factory=list)
+    requires_immediate_attention: bool
     limitations: list[str] = Field(default_factory=list)

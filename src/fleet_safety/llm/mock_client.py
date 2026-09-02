@@ -283,3 +283,45 @@ class MockLLMClient:
         if not tail:
             summary = f"{subject}. Limited supporting detail was provided."
         return summary
+
+
+class DriverRiskMockLLMClient:
+    """
+    Offline stand-in for Agent 2's narrative layer. Templates a grounded
+    sentence per recurring pattern and a couple of focus areas, using only
+    the numbers it was handed (never inventing a count or trend it wasn't
+    given) — same purpose as MockLLMClient above: free, deterministic,
+    testable, not a claim of matching real-model prose quality.
+    """
+
+    def complete(self, system_prompt: str, user_message: str) -> str:
+        stats = json.loads(user_message)
+        patterns_out = []
+        for p in stats.get("recurring_patterns", []):
+            trend_phrase = {
+                "INCREASING": "and is becoming more frequent",
+                "DECREASING": "but has been becoming less frequent",
+                "STABLE": "at a steady rate",
+                "INSUFFICIENT_DATA": "though there isn't enough dated history yet to call a trend",
+            }.get(p.get("trend"), "")
+            explanation = (
+                f"{p['pattern']} was recorded {p['occurrences']} times in this window, {trend_phrase}."
+            ).replace("  ", " ")
+            patterns_out.append({"pattern": p["pattern"], "explanation": explanation})
+
+        focus_areas = []
+        primary = stats.get("primary_concern")
+        if primary and primary != "None":
+            focus_areas.append(primary.replace("_", " ").capitalize())
+        for p in stats.get("recurring_patterns", [])[:2]:
+            label = p["pattern"]
+            if label not in focus_areas:
+                focus_areas.append(label)
+        if not focus_areas:
+            focus_areas.append("General defensive driving awareness")
+
+        return json.dumps({
+            "recurring_patterns": patterns_out,
+            "recommended_focus_areas": focus_areas[:4],
+        })
+        return summary
