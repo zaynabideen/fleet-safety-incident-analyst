@@ -1,0 +1,19 @@
+[project]
+name = "fleet-safety-incident-analyst"
+version = "0.1.0"
+description = "Agent 1 (Fleet Safety Incident Analyst) of a multi-agent fleet safety intelligence platform."
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+live = ["anthropic>=0.40.0"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

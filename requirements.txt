@@ -1,0 +1,7 @@
+pydantic>=2.0
+pytest>=7.0
+
+# Only required for the live LLM backend (scripts/run_scenarios.py --live,
+# or importing fleet_safety.llm.anthropic_client). Not needed to run tests
+# or the offline demo.
+anthropic>=0.40.0

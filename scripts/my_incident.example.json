@@ -1,0 +1,13 @@
+{
+  "incident_id": "INC-CUSTOM-001",
+  "event_type": "harsh_braking",
+  "vehicle_speed": 10,
+  "speed_unit": "mph",
+  "following_distance": 3.6,
+  "weather": "clear",
+  "road_condition": "dry",
+  "location_type": "highway",
+  "description": "nothing happend",
+  "video_available": false,
+  "image_available": false
+}
