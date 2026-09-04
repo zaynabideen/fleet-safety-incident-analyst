@@ -5,3 +5,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Local test-run history from scripts/web_ui.py's dashboard -- machine-local
+# test data, not something that belongs in version control.
+data/
